@@ -1,0 +1,64 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Letta server — external AWS RDS Postgres (pgvector)
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  One-time RDS setup
+#    • CREATE EXTENSION IF NOT EXISTS vector;
+#    • Apply ./init.sql (schema/role) against the target database.
+#    • Parameter group: set rds.force_ssl=0
+#        – pg8000 alembic step can't negotiate libpq-style TLS.
+#        – Runtime asyncpg still uses TLS via ssl=require (letta/server/db.py).
+#
+#  Environment
+#    Required : LETTA_PG_USER, LETTA_PG_PASSWORD, LETTA_PG_HOST, LETTA_PG_DB
+#    Optional : LETTA_PG_PORT (default 5432)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  letta-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.rds
+    image: letta/letta-rds:latest
+    hostname: letta-server
+    restart: unless-stopped
+    ports:
+      - "8083:8083"
+      - "8283:8283"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - LETTA_PG_USER=${LETTA_PG_USER:?LETTA_PG_USER is required}
+      - LETTA_PG_PASSWORD=${LETTA_PG_PASSWORD:?LETTA_PG_PASSWORD is required}
+      - LETTA_PG_HOST=${LETTA_PG_HOST:?LETTA_PG_HOST is required}
+      - LETTA_PG_PORT=${LETTA_PG_PORT:-5432}
+      - LETTA_PG_DB=${LETTA_PG_DB:?LETTA_PG_DB is required}
+      - LETTA_DEBUG=${LETTA_DEBUG:-False}
+      - SECURE=${SECURE:-true}
+      - LETTA_SERVER_PASSWORD=${LETTA_API_KEY:?LETTA_API_KEY is required}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+      - AZURE_API_KEY=${AZURE_API_KEY}
+      - AZURE_BASE_URL=${AZURE_BASE_URL}
+      - AZURE_API_VERSION=${AZURE_API_VERSION}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - VLLM_API_BASE=${VLLM_API_BASE}
+      - OPENLLM_AUTH_TYPE=${OPENLLM_AUTH_TYPE}
+      - OPENLLM_API_KEY=${OPENLLM_API_KEY}
+      - LETTA_OTEL_EXPORTER_OTLP_ENDPOINT=${LETTA_OTEL_EXPORTER_OTLP_ENDPOINT}
+      - CLICKHOUSE_ENDPOINT=${CLICKHOUSE_ENDPOINT}
+      - CLICKHOUSE_DATABASE=${CLICKHOUSE_DATABASE}
+      - CLICKHOUSE_USERNAME=${CLICKHOUSE_USERNAME}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+    volumes:
+      # MCP URL validator — relaxed to allow private/internal IPs (Docker
+      # network peers, EC2 private subnets). Upstream blocks all non-global IPs.
+      - ./docker/patches/url_validation.py:/app/letta/helpers/url_validation.py:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8283/v1/health/ || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 20

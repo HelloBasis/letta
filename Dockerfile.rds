@@ -1,0 +1,76 @@
+# Builder: install Python deps with uv
+FROM python:3.11-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG LETTA_ENVIRONMENT=PROD
+ENV LETTA_ENVIRONMENT=${LETTA_ENVIRONMENT} \
+    UV_NO_PROGRESS=1 \
+    UV_PYTHON_PREFERENCE=system \
+    UV_CACHE_DIR=/tmp/uv_cache
+
+ARG LETTA_VERSION
+ENV LETTA_VERSION=${LETTA_VERSION}
+
+WORKDIR /app
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
+COPY pyproject.toml uv.lock ./
+COPY . .
+
+RUN uv sync --frozen --no-dev --all-extras --python 3.11
+
+# Runtime: slim image targeting external RDS Postgres
+FROM python:3.11-slim AS runtime
+
+ARG NODE_VERSION=22
+ARG OTEL_VERSION=0.96.0
+ARG TARGETARCH
+
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+      arm64|aarch64) OTEL_ARCH=arm64 ;; \
+      amd64|x86_64|x64) OTEL_ARCH=amd64 ;; \
+      *) OTEL_ARCH=amd64 ;; \
+    esac; \
+    apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates libpq5 redis-server gnupg && \
+    curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION}.x | bash - && \
+    apt-get install -y --no-install-recommends nodejs && \
+    OTEL_FILENAME="otelcol-contrib_${OTEL_VERSION}_linux_${OTEL_ARCH}.tar.gz"; \
+    curl -L "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v${OTEL_VERSION}/${OTEL_FILENAME}" -o /tmp/otel-collector.tar.gz && \
+    tar xzf /tmp/otel-collector.tar.gz -C /usr/local/bin && \
+    rm /tmp/otel-collector.tar.gz && \
+    mkdir -p /etc/otel /etc/ssl/rds && \
+    apt-get purge -y gnupg && apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY otel/otel-collector-config-file.yaml /etc/otel/config-file.yaml
+COPY otel/otel-collector-config-clickhouse.yaml /etc/otel/config-clickhouse.yaml
+COPY otel/otel-collector-config-signoz.yaml /etc/otel/config-signoz.yaml
+
+ARG LETTA_ENVIRONMENT=PROD
+ENV LETTA_ENVIRONMENT=${LETTA_ENVIRONMENT} \
+    VIRTUAL_ENV="/app/.venv" \
+    PATH="/app/.venv/bin:$PATH"
+
+ARG LETTA_VERSION
+ENV LETTA_VERSION=${LETTA_VERSION}
+
+WORKDIR /app
+
+COPY --from=builder /app .
+
+COPY scripts/rds-entrypoint.sh /usr/local/bin/rds-entrypoint.sh
+RUN chmod +x /usr/local/bin/rds-entrypoint.sh
+
+EXPOSE 8283 6379 4317 4318
+
+ENTRYPOINT ["/usr/local/bin/rds-entrypoint.sh"]
+CMD ["./letta/server/startup.sh"]
