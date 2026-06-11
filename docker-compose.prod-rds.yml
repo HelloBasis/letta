@@ -54,9 +54,9 @@ services:
       - CLICKHOUSE_USERNAME=${CLICKHOUSE_USERNAME}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
     volumes:
-      # MCP URL validator — relaxed to allow private/internal IPs (Docker
-      # network peers, EC2 private subnets). Upstream blocks all non-global IPs.
-      - ./docker/patches/url_validation.py:/app/letta/helpers/url_validation.py:ro
+      # Patched modules mirror /app's tree under docker/patches/ and are
+      # copied over the installed source by rds-entrypoint.sh at startup.
+      - ./docker/patches:/patches:ro
     healthcheck:
       test: ['CMD-SHELL', 'curl -sf http://localhost:8283/v1/health/ || exit 1']
       interval: 10s

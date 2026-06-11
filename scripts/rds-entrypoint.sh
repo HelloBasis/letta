@@ -16,6 +16,13 @@ set -eu
 #    • pg8000 has no PGPASSWORD fallback, so the password lives in the URL.
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Overlay any patched modules dropped into /patches (mirroring /app's tree)
+# onto the installed source. Lets compose ship a single bind mount instead of
+# one line per file.
+if [ -d /patches ]; then
+    cp -RL /patches/. /app/
+fi
+
 if [ -z "${LETTA_PG_URI:-}" ]; then
     : "${LETTA_PG_USER:?LETTA_PG_USER is required when LETTA_PG_URI is unset}"
     : "${LETTA_PG_PASSWORD:?LETTA_PG_PASSWORD is required when LETTA_PG_URI is unset}"
